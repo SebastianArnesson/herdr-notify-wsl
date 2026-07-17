@@ -1,5 +1,5 @@
-id = "aclima.herdr-notify"
-name = "Herdr Notify (Windows)"
+id = "aclima.herdr-notify-windows"
+name = "Herdr Notify for Windows"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
 description = "Raise a Windows 11 toast when an agent finishes its turn or needs input."

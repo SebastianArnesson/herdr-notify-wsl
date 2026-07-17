@@ -1,4 +1,4 @@
-# Herdr Notify (Windows)
+# Herdr Notify for Windows
 
 Raise a native **Windows 11 toast** when a herdr agent needs your attention — so you can run
 several agents and get pinged the moment one finishes or blocks, without watching the panes.
@@ -37,7 +37,7 @@ herdr plugin link .
 Confirm toasts actually appear on your machine:
 
 ```powershell
-herdr plugin action invoke aclima.herdr-notify.test
+herdr plugin action invoke aclima.herdr-notify-windows.test
 ```
 
 You should get a "Test notification - setup OK" toast. If nothing appears, check
