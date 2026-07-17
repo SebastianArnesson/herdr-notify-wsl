@@ -1,0 +1,2 @@
+# Keep PowerShell scripts LF so checkouts stay consistent across OSes.
+*.ps1 text eol=lf

@@ -1,0 +1,19 @@
+id = "aclima.herdr-notify"
+name = "Herdr Notify (Windows)"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Raise a Windows 11 toast when an agent finishes its turn or needs input."
+platforms = ["windows"]
+
+# On every agent status change, notify.ps1 diffs each agent pane's status against the last-seen
+# one and toasts on the working -> done/idle (finished) and working -> blocked (needs input) edges.
+[[events]]
+on = "pane.agent_status_changed"
+command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "notify.ps1"]
+
+# Fire one sample toast to confirm delivery works (Focus Assist off, notifications enabled).
+[[actions]]
+id = "test"
+title = "herdr-notify: test toast"
+contexts = ["workspace", "tab", "pane"]
+command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "notify.ps1", "-Test"]
