@@ -50,7 +50,7 @@ herdr plugin link .
 Confirm toasts actually appear on your Windows host:
 
 ```bash
-herdr plugin action invoke aclima.herdr-notify-windows.test
+herdr plugin action invoke saeedrahimi.herdr-notify-wsl.test
 ```
 
 You should get a "Test notification - setup OK" toast. If nothing appears, check
