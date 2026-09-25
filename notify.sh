@@ -21,13 +21,23 @@ STATE_PATH="$STATE_DIR/agent-status.json"
 PS="${WINDIR:+$WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe}"
 PS="${PS:-powershell.exe}"
 
-# Raise a native Windows toast. Args: title, message. Text is passed as base64 to
-# dodge any quoting/encoding hazard crossing the WSL->Windows boundary.
+# Raise a native Windows toast. Args: title, message, skip_if_terminal_focused (1/0). Text is
+# passed as base64 to dodge any quoting/encoding hazard crossing the WSL->Windows boundary.
+# ponytail: "terminal focused" = foreground process is Windows Terminal; can't tell which WT
+# tab is active, so another WT tab in front also suppresses. Add other terminal names here if needed.
 show_toast() {
-  local title_b64 msg_b64
+  local title_b64 msg_b64 skip_focused="${3:-0}"
   title_b64=$(printf '%s' "$1" | base64 -w0)
   msg_b64=$(printf '%s' "$2" | base64 -w0)
-  "$PS" -NoProfile -ExecutionPolicy Bypass -Command "
+  "$PS" -NoProfile -Command "
+if ($skip_focused) {
+  Add-Type -Namespace HerdrNotify -Name Win32 -MemberDefinition '
+    [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();
+    [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);'
+  [uint32]\$fgPid = 0
+  [void][HerdrNotify.Win32]::GetWindowThreadProcessId([HerdrNotify.Win32]::GetForegroundWindow(), [ref]\$fgPid)
+  if ((Get-Process -Id \$fgPid -ErrorAction SilentlyContinue).ProcessName -eq 'WindowsTerminal') { exit }
+}
 \$title = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$title_b64'))
 \$msg   = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$msg_b64'))
 \$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
@@ -46,26 +56,28 @@ if [[ "${1:-}" == "--test" || "${1:-}" == "-Test" ]]; then
   exit 0
 fi
 
-# Current agent panes -> JSON object { pane_id: {status, agent, workspace} }
+# Current agent panes -> JSON object { pane_id: {status, agent, workspace, focused} }
 current=$("$HERDR_BIN" pane list 2>/dev/null | jq -c '
   [.result.panes[] | select(.agent != null and .agent != "")
-    | {key: .pane_id, value: {status: (.agent_status // ""), agent: (.agent // ""), workspace: (.workspace_id // "")}}]
+    | {key: .pane_id, value: {status: (.agent_status // ""), agent: (.agent // ""), workspace: (.workspace_id // ""),
+                              focused: (.focused == true)}}]
   | from_entries')
 
 # Previous status map { pane_id: status }; empty object if no state yet.
-prev="{}"
-[[ -f "$STATE_PATH" ]] && prev=$(cat "$STATE_PATH" 2>/dev/null || echo '{}')
+# Missing, empty, corrupt or non-object state all fall back to {} so a bad file can't wedge us.
+prev=$(jq -cs '.[0] | objects // {}' "$STATE_PATH" 2>/dev/null) || prev='{}'
 
-# Notifications: only a working -> rest edge fires. Emits TSV: agent<TAB>workspace<TAB>kind
+# Notifications: only a working -> rest edge fires. Emits agent<US>workspace<US>kind<US>focused, using the
+# non-whitespace 0x1f separator so an empty field isn't collapsed by `read` (tab would be).
 notifs=$(jq -rn --argjson prev "$prev" --argjson cur "$current" '
   $cur | to_entries[]
   | . as $e
   | ($prev[$e.key] // "") as $before
   | select($before == "working")
-  | if (["done","idle"] | index($e.value.status)) then "done"
-    elif $e.value.status == "blocked" then "blocked"
-    else empty end as $kind
-  | [$e.value.agent, $e.value.workspace, $kind] | @tsv')
+  | (if (["done","idle"] | index($e.value.status)) then "done"
+     elif $e.value.status == "blocked" then "blocked"
+     else empty end) as $kind
+  | [$e.value.agent, $e.value.workspace, $kind, ($e.value.focused | tostring)] | join("\u001f")')
 
 # Resolve a workspace id to a human label, falling back to the id.
 workspace_label() {
@@ -78,14 +90,17 @@ workspace_label() {
 }
 
 if [[ -n "$notifs" ]]; then
-  while IFS=$'\t' read -r agent workspace kind; do
+  while IFS=$'\x1f' read -r agent workspace kind focused; do
     [[ -z "$agent" ]] && continue
     label=$(workspace_label "$workspace")
     who="$agent"
     [[ -n "$label" ]] && who="$agent · $label"
     body="Turn finished"
     [[ "$kind" == "blocked" ]] && body="Needs input"
-    show_toast "$who" "$body"
+    # Pane already in view in herdr: stay quiet unless the terminal isn't the foreground window.
+    skip=0
+    [[ "$focused" == "true" ]] && skip=1
+    show_toast "$who" "$body" "$skip"
   done <<< "$notifs"
 fi
 
